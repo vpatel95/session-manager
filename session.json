@@ -1,0 +1,11 @@
+{
+    "cookieName": "sessionid",
+    "gcLifetime": 60,
+    "maxLifetime": 172800,
+    "HTTPOnly": true,
+    "secure": false,
+    "cookieLifeTime": 172800,
+    "domain": "",
+    "enableHTTPHeader": false,
+    "sessHeader": ""
+}
