@@ -12,7 +12,7 @@ Light-weight session in-memory session manager for golang
 ## Install <a name = "install"></a>
 
 ```
-go get github.com/vpatel95/session-manager
+$ go get github.com/vpatel95/session-manager
 ```
 
 End with an example of getting some data out of the system or using it for a little demo.
@@ -20,12 +20,12 @@ End with an example of getting some data out of the system or using it for a lit
 ## Usage <a name = "usage"></a>
 
 1. Import the package using  
-    ```
+    ```go
     import sess "github.com/vpatel95/session-manager"
     ```
 
 2. Set the attributes in `session.json` file and put it in `<project_root>/configs/session.json`. An Example is given below  
-    ```
+    ```json
     {  
         "cookieName": "sessionid",  
         "gcLifetime": 60,  
@@ -71,7 +71,7 @@ End with an example of getting some data out of the system or using it for a lit
 
 This is an example of a middleware that verifies the session and sets "user" key in the session
 
-```
+```go
 func ValidateSessionID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessId, err := sessManager.GetSessionId(r)
@@ -97,7 +97,6 @@ func ValidateSessionID(next http.Handler) http.Handler {
 		}
 
 		sess.Set("user", user)
-
 		next.ServeHTTP(w, r)
 	})
 }
