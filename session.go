@@ -78,7 +78,7 @@ func (s *Session) Get(key interface{}) interface{} {
 
 func (s *Session) Exist(key interface{}) bool {
 	s.lock.RLock()
-	defer s.lock.Unlock()
+	defer s.lock.RUnlock()
 
 	if _, ok := s.value[key]; ok {
 		return true
