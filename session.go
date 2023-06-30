@@ -1,277 +1,266 @@
 package session
 
 import (
-	"container/list"
-	"encoding/json"
-	"errors"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
+    "container/list"
+    "errors"
+    "net/http"
+    "net/url"
+    "sync"
+    "time"
 )
 
 var (
-	ProjectRoot, _ = os.Getwd()
-	SessManager    *SessionManager
-	ConfigLocation = filepath.Join(ProjectRoot, "configs", "session.json")
+    SessManager     *SessionManager
 )
 
 type (
-	dict     = map[interface{}]interface{}
-	sessDict = map[string]*list.Element
+    dict        = map[interface{}]interface{}
+    sessDict    = map[string]*Session
 )
 
 type Session struct {
-	sessionId    string
-	lastAccessed time.Time
-	value        dict
-	lock         sync.RWMutex
-}
-
-type SessionManagerConfig struct {
-	CookieName       string `json:"cookie_name"`
-	CleanerInterval  int64  `json:"cleaner_interval"`
-	MaxLifetime      int64  `json:"max_lifetime"`
-	HTTPOnly         bool   `json:"http_only"`
-	Secure           bool   `json:"secure"`
-	CookieLifetime   int    `json:"cookie_lifetime"`
-	Domain           string `json:"domain"`
-	EnableHttpHeader bool   `json:"enable_http_header"`
-	SessionHeader    string `json:"session_header"`
-}
-
-type SessionManager struct {
-	lock     sync.RWMutex
-	sessions sessDict
-	list     *list.List
-	Config   *SessionManagerConfig
-}
-
-func GetManagerConfig() *SessionManagerConfig {
-	confFile, err := ioutil.ReadFile(ConfigLocation)
-	if err != nil {
-		return nil
-	}
-
-	config := SessionManagerConfig{}
-
-	if err := json.Unmarshal([]byte(confFile), &config); err != nil {
-		return nil
-	}
-
-	return &config
+    sessionId       string
+    lastAccessed    time.Time
+    sd              dict
+    lock            sync.RWMutex
 }
 
 func (s *Session) Get(key interface{}) interface{} {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+    s.lock.RLock()
+    defer s.lock.RUnlock()
 
-	if val, ok := s.value[key]; ok {
-		return val
-	}
+    if val, ok := s.sd[key]; ok {
+        return val
+    }
 
-	return nil
+    return nil
 }
 
 func (s *Session) Exist(key interface{}) bool {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+    s.lock.RLock()
+    defer s.lock.RUnlock()
 
-	if _, ok := s.value[key]; ok {
-		return true
-	}
+    if _, ok := s.sd[key]; ok {
+        return true
+    }
 
-	return false
+    return false
 }
 
-func (s *Session) Set(key, value interface{}) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *Session) Set(key, sd interface{}) error {
+    s.lock.Lock()
+    defer s.lock.Unlock()
 
-	s.value[key] = value
+    s.sd[key] = sd
 
-	return nil
+    return nil
 }
 
 func (s *Session) Delete(key interface{}) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+    s.lock.Lock()
+    defer s.lock.Unlock()
 
-	delete(s.value, key)
+    delete(s.sd, key)
 
-	return nil
+    return nil
 }
 
-func NewSessionManager(conf *SessionManagerConfig) *SessionManager {
-	if conf.MaxLifetime == 0 {
-		conf.MaxLifetime = conf.CleanerInterval
-	}
+type SessionCookie struct {
+    Name        string
+    Domain      string
+    HTTPOnly    bool
+    Secure      bool
+    Lifetime    time.Duration
+}
 
-	return &SessionManager{
-		list:     list.New(),
-		sessions: make(sessDict),
-		Config:   conf,
-	}
+type SessionManagerConfig struct {
+    CleanerInterval     time.Duration
+    MaxLifetime         time.Duration
+    CookieLifetime      time.Duration
+    EnableHttpHeader    bool
+    SessionHeader       string
+}
+
+type SessionManager struct {
+    lock        sync.RWMutex
+    sessions    sessDict
+    list        *list.List
+    Config      SessionManagerConfig
+    Cookie      SessionCookie
 }
 
 func (sm *SessionManager) GetSessionId(r *http.Request) (string, error) {
-	cookie, err := r.Cookie(sm.Config.CookieName)
+    cookie, err := r.Cookie(sm.Cookie.Name)
 
-	if err != nil || cookie.Value == "" {
+    if err != nil || cookie.Value == "" {
 
-		if sm.Config.EnableHttpHeader {
-			sids, found := r.Header[sm.Config.SessionHeader]
-			if found && len(sids) != 0 {
-				return sids[0], nil
-			}
-		}
+        if sm.Config.EnableHttpHeader {
+            sids, found := r.Header[sm.Config.SessionHeader]
+            if found && len(sids) != 0 {
+                return sids[0], nil
+            }
+        }
 
-		return "", err
-	}
+        return "", err
+    }
 
-	return url.QueryUnescape(cookie.Value)
+    return url.QueryUnescape(cookie.Value)
 }
 
-func (sm *SessionManager) SessionExist(sid string) bool {
-	sm.lock.RLock()
-	defer sm.lock.RUnlock()
-
-	if _, ok := sm.sessions[sid]; ok {
-		return true
-	}
-
-	return false
-}
-
-func (sm *SessionManager) SessionReadOrCreate(r *http.Request) (*Session, error) {
-	sid, err := sm.GetSessionId(r)
-	if err != nil || sid == "" {
-		return nil, err
-	}
-
-	sm.lock.RLock()
-	if ele, ok := sm.sessions[sid]; ok {
-		go sm.SessionUpdate(sid)
-		sm.lock.RUnlock()
-
-		return ele.Value.(*Session), nil
-	}
-
-	sm.lock.RUnlock()
-	sm.lock.Lock()
-	newSess := &Session{
-		sessionId:    sid,
-		lastAccessed: time.Now(),
-		value:        make(dict),
-	}
-	ele := sm.list.PushFront(newSess)
-	sm.sessions[sid] = ele
-	sm.lock.Unlock()
-
-	return newSess, nil
-}
-
-func (sm *SessionManager) SessionRead(r *http.Request) (*Session, error) {
-	sid, err := sm.GetSessionId(r)
-	if err != nil || sid == "" {
-		return nil, err
-	}
-
-	sm.lock.RLock()
-	if ele, ok := sm.sessions[sid]; ok {
-		go sm.SessionUpdate(sid)
-		sm.lock.RUnlock()
-
-		return ele.Value.(*Session), nil
-	}
-
-	return nil, errors.New("Session not found")
-}
-
-func (sm *SessionManager) SessionUpdate(sid string) error {
-	sm.lock.Lock()
-	defer sm.lock.Unlock()
-
-	if ele, ok := sm.sessions[sid]; ok {
-		ele.Value.(*Session).lastAccessed = time.Now()
-		sm.list.Init().MoveToFront(ele)
-		return nil
-	}
-
-	return errors.New("Error while updating session")
-}
-
-func (sm *SessionManager) SessionDestroy(sid string) error {
-	sm.lock.Lock()
-	defer sm.lock.Unlock()
-
-	if ele, ok := sm.sessions[sid]; ok {
-		delete(sm.sessions, sid)
-		sm.list.Remove(ele)
-		return nil
-	}
-
-	return errors.New("Error while deleting session")
-}
 
 func (sm *SessionManager) GlobalCleaner() {
-	sm.lock.RLock()
-	for {
-		ele := sm.list.Back()
-		if ele == nil {
-			break
-		}
+    sm.lock.RLock()
+    for sid, s := range sm.sessions {
+        if s == nil {
+            continue
+        }
 
-		if (ele.Value.(*Session).lastAccessed.Unix() + sm.Config.MaxLifetime) < time.Now().Unix() {
-			sm.lock.RUnlock()
-			sm.lock.Lock()
-			delete(sm.sessions, ele.Value.(*Session).sessionId)
-			sm.list.Remove(ele)
-			sm.lock.Unlock()
-			sm.lock.RLock()
-		} else {
-			break
-		}
-	}
-	sm.lock.RUnlock()
-	time.AfterFunc(time.Duration(sm.Config.CleanerInterval)*time.Second, func() { sm.GlobalCleaner() })
+        if (time.Now().After(s.lastAccessed.Add(sm.Config.MaxLifetime))) {
+            sm.lock.RUnlock()
+            sm.lock.Lock()
+            delete(sm.sessions, sid)
+            sm.lock.Unlock()
+            sm.lock.RLock()
+        }
+    }
+    sm.lock.RUnlock()
+    time.AfterFunc(sm.Config.CleanerInterval, func() { sm.GlobalCleaner() })
 }
 
 func (sm *SessionManager) SessionRefresh(oldSid, sid string) (*Session, error) {
-	sm.lock.RLock()
-	if ele, ok := sm.sessions[oldSid]; ok {
-		go sm.SessionUpdate(oldSid)
-		sm.lock.RUnlock()
-		sm.lock.Lock()
-		ele.Value.(*Session).sessionId = sid
-		sm.sessions[sid] = ele
-		delete(sm.sessions, oldSid)
-		sm.lock.Unlock()
+    sm.lock.RLock()
+    if s, ok := sm.sessions[oldSid]; ok {
+        go sm.SessionUpdate(oldSid)
+        sm.lock.RUnlock()
+        sm.lock.Lock()
+        s.sessionId = sid
+        sm.sessions[sid] = s
+        delete(sm.sessions, oldSid)
+        sm.lock.Unlock()
 
-		return ele.Value.(*Session), nil
-	}
-	sm.lock.RUnlock()
-	sm.lock.Lock()
-	newSess := &Session{
-		sessionId:    sid,
-		lastAccessed: time.Now(),
-		value:        make(dict),
-	}
-	ele := sm.list.Init().PushFront(newSess)
-	sm.sessions[sid] = ele
-	sm.lock.Unlock()
+        return s, nil
+    }
+    sm.lock.RUnlock()
+    sm.lock.Lock()
+    newSess := &Session{
+        sessionId:      sid,
+        lastAccessed:   time.Now(),
+        sd:             make(dict),
+    }
+    sm.sessions[sid] = newSess
+    sm.lock.Unlock()
 
-	return newSess, nil
+    return newSess, nil
 }
 
 func (sm *SessionManager) SessionCount() int {
-	return sm.list.Len()
+    return len(sm.sessions)
 }
 
-func init() {
-	SessManager = NewSessionManager(GetManagerConfig())
-	go SessManager.GlobalCleaner()
+func (sm *SessionManager) SessionExist(sid string) bool {
+    sm.lock.RLock()
+    defer sm.lock.RUnlock()
+
+    if _, ok := sm.sessions[sid]; ok {
+        return true
+    }
+
+    return false
+}
+
+// Update the session access time. Refresh Session
+func (sm *SessionManager) SessionUpdate(sid string) error {
+    sm.lock.Lock()
+    defer sm.lock.Unlock()
+
+    if s, ok := sm.sessions[sid]; ok {
+        s.lastAccessed = time.Now()
+        return nil
+    }
+
+    return errors.New("Error while updating session")
+}
+
+// Remove the session for matching sid
+func (sm *SessionManager) SessionDestroy(sid string) error {
+    sm.lock.Lock()
+    defer sm.lock.Unlock()
+
+    if _, ok := sm.sessions[sid]; ok {
+        delete(sm.sessions, sid)
+        return nil
+    }
+
+    return errors.New("Error while deleting session")
+}
+
+// Read session. Error out if session not found
+func (sm *SessionManager) SessionRead(r *http.Request) (*Session, error) {
+    sid, err := sm.GetSessionId(r)
+    if err != nil || sid == "" {
+        return nil, err
+    }
+
+    sm.lock.RLock()
+    if s, ok := sm.sessions[sid]; ok {
+        go sm.SessionUpdate(sid)
+        sm.lock.RUnlock()
+
+        return s, nil
+    }
+
+    return nil, errors.New("Session not found")
+}
+
+// Read an existing session for request, if not present create new
+func (sm *SessionManager) SessionReadOrCreate(r *http.Request) (*Session, error) {
+    sid, err := sm.GetSessionId(r)
+    if err != nil || sid == "" {
+        return nil, err
+    }
+
+    sm.lock.RLock()
+    if s, ok := sm.sessions[sid]; ok {
+        go sm.SessionUpdate(sid)
+        sm.lock.RUnlock()
+
+        return s, nil
+    }
+
+    sm.lock.RUnlock()
+    sm.lock.Lock()
+    s := &Session{
+        sessionId:      sid,
+        lastAccessed:   time.Now(),
+        sd:             make(dict),
+    }
+    sm.sessions[sid] = s
+    sm.lock.Unlock()
+
+    return s, nil
+}
+
+// Create a new instance of session manager.
+func New() *SessionManager {
+
+    sm := &SessionManager{
+        sessions:   make(sessDict),
+        Config:     SessionManagerConfig{
+            CleanerInterval: 1 * time.Minute,
+            MaxLifetime: 24 * time.Hour,
+            EnableHttpHeader: false,
+            SessionHeader: "",
+        },
+        Cookie:     SessionCookie{
+            Name: "sessionid",
+            Domain: "",
+            HTTPOnly: true,
+            Secure: false,
+            Lifetime: 24 * time.Hour,
+        },
+    }
+
+    go sm.GlobalCleaner()
+
+    return sm
 }
