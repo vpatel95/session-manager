@@ -15,56 +15,54 @@ Light-weight session in-memory session manager for golang
 $ go get github.com/vpatel95/session-manager
 ```
 
-End with an example of getting some data out of the system or using it for a little demo.
-
 ## Usage <a name = "usage"></a>
 
 1. Import the package using  
     ```go
-    import sess "github.com/vpatel95/session-manager"
+    import sm "github.com/vpatel95/session-manager"
     ```
 
-2. Set the attributes in `session.json` file and put it in `<project_root>/configs/session.json`. An Example is given below  
-    ```json
-    {  
-        "cookieName": "sessionid",  
-        "gcLifetime": 60,  
-        "maxLifetime": 172800,  
-        "HTTPOnly": true,  
-        "secure": false,  
-        "cookieLifeTime": 172800,  
-        "domain": "",  
-        "enableHTTPHeader": false,  
-        "sessHeader": ""  
-    }  
-    ```
-3. Create a SessionManager object or use default  
-    - Default Session Manager can be accessed by
-        ```
-        sess.SessionManager
-        ```
-    - Create a new SessionManager
-        ```
-        manager := sess.NewSessionManager(sess.GetManagerConfig())
-        ```
+2. Create a SessionManager object 
+   ```go
+   manager := sm.New()
+
+   // The default configs for session manager and cookie will be as follow
+   Config: SessionManagerConfig{
+   	CleanerInterval:    1 * time.Minute,
+   	MaxLifetime:        24 * time.Hour,
+   	EnableHttpHeader:   false,
+   	SessionHeader:      "",
+   	AutoRefreshSession: false,
+   },
+   Cookie: SessionCookie{
+   	Name:     "sessionid",
+   	Domain:   "",
+   	HTTPOnly: true,
+   	Secure:   false,
+   	Lifetime: 24 * time.Hour,
+   },
+   ```
         
-4. SessionManager Operations
+5. SessionManager Operations
+    ```go
+    func (sm *SessionManager) GetSessionId(r *http.Request) (string, error) 		// extract session ID from request
+    func (sm *SessionManager) ListSessions() 				    		// Print all the sessions in the manager
+    func (sm *SessionManager) SessionCount() int			    		// returns number of sessions in the manager
+    func (sm *SessionManager) SessionRefresh(oldSid, sid string) (*Session, error)	// change the session Id for the session
+    func (sm *SessionManager) SessionExist(sid string) bool				// check if session with session Id exists
+    func (sm *SessionManager) SessionUpdate(sid string) error 				// update last access time for the session
+    func (sm *SessionManager) SessionDestroy(sid string) error 				// delete session with given session Id
+    func (sm *SessionManager) SessionRead(r *http.Request) (*Session, error) 		// retreive the session
+    func (sm *SessionManager) SessionCreate(sid string) (*Session, error) 		// create a new session
+    func (sm *SessionManager) SessionReadOrCreate(r *http.Request) (*Session, error)    // retreive the session, if not existing create a new session
     ```
-    session, err := manager.SessionReadOrCreate(request)        // retreive the session, if not existing create a new session
-    sessId, err := manager.GetSessionId(request)                // extract session ID from request
-    ok := manager.SessionExist(sessId)                          // check if session with session Id exists
-    session, err := manager.SessionRead(request)                // retreive the session
-    err := manager.SessionUpdate(sessId)                        // update last access time for the session
-    err := manager.SessionDestroy(sessId)                       // delete session with given session Id
-    session, err := manager.SessionRefresh(oldSessId, sessId)   // change the session Id for the session
-    count := manager.SessionCount()                             // returns number of sessions in the manager
+    
+6. Session operations
     ```
-5. Session operations
-    ```
-    session.Get(key)        // to get value for 'key' from the session
-    session.Set(key)        // to set value for 'key in the session
-    session.Exist(key)      // returns bool if 'key' exists in the session
-    session.Delete(key)     // delete 'key' from the session
+    func (s *Session) Get(key interface{}) interface{}	// to get value for 'key' from the session
+    func (s *Session) Set(key, sd interface{}) error    // to set value for 'key in the session
+    func (s *Session) Exist(key interface{}) bool      	// returns bool if 'key' exists in the session
+    func (s *Session) Delete(key interface{}) error     // delete 'key' from the session
     ```
     
 ## Example <a name = "example"></a>
