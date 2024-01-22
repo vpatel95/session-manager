@@ -3,6 +3,7 @@ package session
 import (
 	"container/list"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -103,6 +104,28 @@ func (sm *SessionManager) GetSessionId(r *http.Request) (string, error) {
 			}
 		}
 
+		return "", err
+	}
+
+	return url.QueryUnescape(cookie.Value)
+}
+
+func (sm *SessionManager) GetSessionIdFromHeader(r *http.Request) (string, error) {
+	if sm.Config.EnableHttpHeader {
+		sids, found := r.Header[sm.Config.SessionHeader]
+		if found && len(sids) != 0 {
+			return sids[0], nil
+		}
+	}
+
+	return "", errors.New(fmt.Sprintf(
+		"Error getting session id from %s", sm.Config.SessionHeader))
+}
+
+func (sm *SessionManager) GetSessionIdFromCookie(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(sm.Cookie.Name)
+
+	if err != nil || cookie.Value == "" {
 		return "", err
 	}
 
