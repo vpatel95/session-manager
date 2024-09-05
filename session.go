@@ -1,7 +1,6 @@
 package session
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"log"
@@ -9,10 +8,6 @@ import (
 	"net/url"
 	"sync"
 	"time"
-)
-
-var (
-	SessManager *SessionManager
 )
 
 type (
@@ -87,7 +82,6 @@ type SessionManagerConfig struct {
 type SessionManager struct {
 	lock     sync.RWMutex
 	sessions sessDict
-	list     *list.List
 	Config   SessionManagerConfig
 	Cookie   SessionCookie
 }
@@ -118,8 +112,7 @@ func (sm *SessionManager) GetSessionIdFromHeader(r *http.Request) (string, error
 		}
 	}
 
-	return "", errors.New(fmt.Sprintf(
-		"Error getting session id from %s", sm.Config.SessionHeader))
+	return "", fmt.Errorf("error getting session id from %s", sm.Config.SessionHeader)
 }
 
 func (sm *SessionManager) GetSessionIdFromCookie(r *http.Request) (string, error) {
@@ -148,26 +141,22 @@ func (sm *SessionManager) SessionCount() int {
 }
 
 func (sm *SessionManager) SessionRefresh(oldSid, sid string) (*Session, error) {
-	sm.lock.RLock()
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+
 	if s, ok := sm.sessions[oldSid]; ok {
-		sm.lock.RUnlock()
-		sm.lock.Lock()
 		s.sessionId = sid
 		sm.sessions[sid] = s
 		delete(sm.sessions, oldSid)
-		sm.lock.Unlock()
 
 		return s, nil
 	}
-	sm.lock.RUnlock()
-	sm.lock.Lock()
 	newSess := &Session{
 		sessionId:    sid,
 		lastAccessed: time.Now(),
 		sd:           make(dict),
 	}
 	sm.sessions[sid] = newSess
-	sm.lock.Unlock()
 
 	return newSess, nil
 }
@@ -176,11 +165,8 @@ func (sm *SessionManager) SessionExist(sid string) bool {
 	sm.lock.RLock()
 	defer sm.lock.RUnlock()
 
-	if _, ok := sm.sessions[sid]; ok {
-		return true
-	}
-
-	return false
+	_, ok := sm.sessions[sid]
+	return ok
 }
 
 // Update the session access time. Refresh Session
@@ -193,7 +179,7 @@ func (sm *SessionManager) SessionUpdate(sid string) error {
 		return nil
 	}
 
-	return errors.New("Error while updating session")
+	return errors.New("error while updating session")
 }
 
 // Remove the session for matching sid
@@ -206,7 +192,7 @@ func (sm *SessionManager) SessionDestroy(sid string) error {
 		return nil
 	}
 
-	return errors.New("Error while deleting session")
+	return errors.New("error while deleting session")
 }
 
 // Read session. Error out if session not found
@@ -217,77 +203,44 @@ func (sm *SessionManager) SessionRead(r *http.Request) (*Session, error) {
 	}
 
 	sm.lock.RLock()
+	defer sm.lock.RUnlock()
 	if s, ok := sm.sessions[sid]; ok {
 		if sm.Config.AutoRefreshSession {
 			go sm.SessionUpdate(sid)
 		}
-		sm.lock.RUnlock()
-
 		return s, nil
 	}
 
-	return nil, errors.New("Session not found")
+	return nil, errors.New("session not found")
 }
 
 func (sm *SessionManager) SessionCreate(sid string) (*Session, error) {
 	sm.lock.Lock()
+	defer sm.lock.Unlock()
+
 	s := &Session{
 		sessionId:    sid,
 		lastAccessed: time.Now(),
 		sd:           make(dict),
 	}
 	sm.sessions[sid] = s
-	sm.lock.Unlock()
-
-	return s, nil
-}
-
-// Read an existing session for request, if not present create new
-func (sm *SessionManager) SessionReadOrCreate(r *http.Request) (*Session, error) {
-	sid, err := sm.GetSessionId(r)
-	if err != nil || sid == "" {
-		return nil, err
-	}
-
-	sm.lock.RLock()
-	if s, ok := sm.sessions[sid]; ok {
-		if sm.Config.AutoRefreshSession {
-			go sm.SessionUpdate(sid)
-		}
-		sm.lock.RUnlock()
-
-		return s, nil
-	}
-
-	sm.lock.RUnlock()
-	sm.lock.Lock()
-	s := &Session{
-		sessionId:    sid,
-		lastAccessed: time.Now(),
-		sd:           make(dict),
-	}
-	sm.sessions[sid] = s
-	sm.lock.Unlock()
 
 	return s, nil
 }
 
 func (sm *SessionManager) GlobalCleaner() {
-	sm.lock.RLock()
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+
 	for sid, s := range sm.sessions {
 		if s == nil {
 			continue
 		}
 
 		if time.Now().After(s.lastAccessed.Add(sm.Config.MaxLifetime)) {
-			sm.lock.RUnlock()
-			sm.lock.Lock()
 			delete(sm.sessions, sid)
-			sm.lock.Unlock()
-			sm.lock.RLock()
 		}
 	}
-	sm.lock.RUnlock()
 	time.AfterFunc(sm.Config.CleanerInterval, func() { sm.GlobalCleaner() })
 }
 
