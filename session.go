@@ -245,17 +245,24 @@ func (sm *SessionManager) GlobalCleaner() {
 }
 
 // Create a new instance of session manager.
-func New() *SessionManager {
+func New(config ...SessionManagerConfig) *SessionManager {
+	var smc SessionManagerConfig
 
-	sm := &SessionManager{
-		sessions: make(sessDict),
-		Config: SessionManagerConfig{
+	if len(config) == 0 {
+		smc = SessionManagerConfig{
 			CleanerInterval:    1 * time.Minute,
 			MaxLifetime:        24 * time.Hour,
 			EnableHttpHeader:   false,
 			SessionHeader:      "",
 			AutoRefreshSession: false,
-		},
+		}
+	} else {
+		smc = config[0]
+	}
+
+	sm := &SessionManager{
+		sessions: make(sessDict),
+		Config:   smc,
 		Cookie: SessionCookie{
 			Name:     "sessionid",
 			Domain:   "",
