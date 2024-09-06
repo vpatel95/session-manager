@@ -1,3 +1,3 @@
 module github.com/vpatel95/session-manager
 
-go 1.19
+go 1.20
