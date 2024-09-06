@@ -3,7 +3,6 @@ package session
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -107,7 +106,7 @@ func (sm *SessionManager) GetSessionId(r *http.Request) (string, error) {
 func (sm *SessionManager) GetSessionIdFromHeader(r *http.Request) (string, error) {
 	if sm.Config.EnableHttpHeader {
 		sids, found := r.Header[sm.Config.SessionHeader]
-		if found && len(sids) != 0 {
+		if found && len(sids) != 0 && sids[0] != "" {
 			return sids[0], nil
 		}
 	}
@@ -119,7 +118,7 @@ func (sm *SessionManager) GetSessionIdFromCookie(r *http.Request) (string, error
 	cookie, err := r.Cookie(sm.Cookie.Name)
 
 	if err != nil || cookie.Value == "" {
-		return "", err
+		return "", fmt.Errorf("error getting session id from cookie : %v", err)
 	}
 
 	return url.QueryUnescape(cookie.Value)
@@ -127,11 +126,10 @@ func (sm *SessionManager) GetSessionIdFromCookie(r *http.Request) (string, error
 
 func (sm *SessionManager) ListSessions() {
 	sm.lock.RLock()
-	for sid, s := range sm.sessions {
+	for _, s := range sm.sessions {
 		if s == nil {
 			continue
 		}
-		log.Printf("SID : %s, Session Data : %v", sid, s.sd)
 	}
 	sm.lock.RUnlock()
 }
@@ -215,6 +213,10 @@ func (sm *SessionManager) SessionRead(r *http.Request) (*Session, error) {
 }
 
 func (sm *SessionManager) SessionCreate(sid string) (*Session, error) {
+	if sid == "" {
+		return nil, errors.New("session id is empty")
+	}
+
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
